@@ -18,6 +18,7 @@ class Heartbeat(SQLModel):
 ### Context ###
 class Context(SQLModel):
     id: int | None = Field(default=None, primary_key=True)
+    agent_id: str | None = Field(default=None, nullable=False, foreign_key="agent.id", index=True)
     name: str = Field(nullable=False)
     type: Literal["compose", "swarm"] = Field(nullable=False)
 
@@ -30,7 +31,7 @@ class Container(SQLModel):
     """
     id: str | None = Field(default=None, primary_key=True)
     agent_id: str = Field(nullable=False, foreign_key="agent.id", index=True)
-    context: Context | None = Field(default=None, nullable=True)
+    context: int = Field(nullable=False, foreign_key="context.id", index=True)
     name: str = Field(nullable=False)
     image: str = Field(nullable=False)
     created_at: int = Field(nullable=False)

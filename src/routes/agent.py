@@ -1,18 +1,10 @@
 import time
 
 from fastapi import Depends, Query, Response
-from typing import List, Optional, Type
-import json
-from sqlalchemy.orm import Session
-
-from src.external import (
-    AgentRegistration,
-    Heartbeat,
-    AgentState,
-    LogMessage
-)
+from typing import List
 from src.database import SessionDep
-from src.models.agents import Agent, Container, ContainerState, Log
+from src.model.api import MultilineLogTransfer
+from src.models.agents import Agent, Container, ContainerState, Log, Heartbeat, Context, MultiContainerLogTransfer
 from src.routes import router
 import logging
 
@@ -67,6 +59,41 @@ def register_container(container: Container, session: SessionDep, response: Resp
     response.status_code = 201
     return container.id
 
+@router.post("/api/agent/{agent_id}/logs")
+def upload_agent_logs(agent_id: str, logs: Log | MultilineLogTransfer | MultiContainerLogTransfer, session: SessionDep, response: Response):
+    if not session.get(Agent, agent_id):
+        logger.warning(f"Attempted to upload logs for unknown agent: {agent_id}")
+        response.status_code = 404
+        return response
+
+    if isinstance(logs, MultiContainerLogTransfer):
+        for container_logs in logs.container_logs:
+            db_container = session.get(Container, container_logs.container_id)
+            if not db_container or db_container.agent_id != agent_id:
+                logger.warning(f"Attempted to upload logs for non-existent or mismatched container: {container_logs.container_id} for agent {agent_id}")
+                continue
+            for log_entry in container_logs.logs:
+                session.add(log_entry)
+    elif isinstance(logs, MultilineLogTransfer):
+        db_container = session.get(Container, logs.container_id)
+        if not db_container or db_container.agent_id != agent_id:
+            logger.warning(f"Attempted to upload logs for non-existent or mismatched container: {logs.container_id} for agent {agent_id}")
+            response.status_code = 404
+            return response
+        for log_entry in logs.logs:
+            session.add(log_entry)
+    else:
+        db_container = session.get(Container, logs.container_id)
+        if not db_container or db_container.agent_id != agent_id:
+            logger.warning(f"Attempted to upload logs for non-existent or mismatched container: {logs.container_id} for agent {agent_id}")
+            response.status_code = 404
+            return response
+        session.add(logs)
+
+    session.commit()
+    response.status_code = 200
+    return response
+
 @router.post("/api/agent/{agent_id}/container/{container_id}/")
 def update_container_state(agent_id: str, container_id: str, container: Container, session: SessionDep, response: Response):
     db_container = session.get(Container, container_id)
@@ -76,6 +103,8 @@ def update_container_state(agent_id: str, container_id: str, container: Containe
         return response
 
     for field, value in container.model_dump().items():
+        if field.endswith("id"):
+            continue  # Skip primary key and foreign key fields
         setattr(db_container, field, value)
 
     session.commit()
@@ -83,19 +112,20 @@ def update_container_state(agent_id: str, container_id: str, container: Containe
     return response
 
 @router.post("/api/agent/{agent_id}/container/{container_id}/logs")
-def upload_container_logs(agent_id: str, container_id: str, logs: List[Log], session: SessionDep):
+def upload_container_logs(agent_id: str, container_id: str, logs: Log | MultilineLogTransfer, session: SessionDep):
     db_container = session.get(Container, container_id)
-
     if not db_container or db_container.agent_id != agent_id:
         logger.warning(f"Attempted to upload logs for non-existent or mismatched container: {container_id} for agent {agent_id}")
-        return {"status": "error", "message": "Container not found"}, 404
+        return Response(status_code=404)
 
-    for log in logs:
-        log.container_id = container_id
-        session.add(log)
+    if isinstance(logs, MultilineLogTransfer):
+        for log_entry in logs.logs:
+            session.add(log_entry)
+    else:
+        session.add(logs)
 
     session.commit()
-    return {"status": "logs_uploaded", "count": len(logs)}
+    return Response(status_code=200)
 
 @router.post("/api/agent/{agent_id}/container/{container_id}/status")
 def update_container_status(agent_id: str, container_id: str, status: str, session: SessionDep, response: Response):
@@ -111,7 +141,7 @@ def update_container_status(agent_id: str, container_id: str, status: str, sessi
             id=container_id,
             status=status
         )
-        session.add(container_state)
+        session.merge(container_state)
     else:
         container_state.status = status
 
@@ -121,7 +151,7 @@ def update_container_status(agent_id: str, container_id: str, status: str, sessi
 
 @router.delete("/api/agent/{agent_id}/container/{container_id}/")
 def delete_container(agent_id: str, container_id: str, session: SessionDep, response: Response):
-    container = session.get(sql_models.Container, container_id)
+    container = session.get(Container, container_id)
     if container and container.agent_id == agent_id:
         session.delete(container)
         session.commit()
@@ -130,3 +160,29 @@ def delete_container(agent_id: str, container_id: str, session: SessionDep, resp
         logger.warning(f"Attempted to delete non-existent or mismatched container: {container_id} for agent {agent_id}")
         response.status_code = 404
     return response
+
+@router.put("/api/agent/{agent_id}/context/")
+def register_context(agent_id: str, context: Context, session: SessionDep, response: Response):
+    if not session.get(Agent, agent_id):
+        logger.warning(f"Attempted to register context for unknown agent: {agent_id}")
+        response.status_code = 404
+        return response
+
+    session.add(context)
+    session.commit()
+    session.refresh(context)
+    response.status_code = 201
+    return context.id
+
+@router.delete("/api/agent/{agent_id}/context/{context_id}/")
+def delete_context(agent_id: str, context_id: int, session: SessionDep, response: Response):
+    context = session.get(Context, context_id)
+    if context and context.agent_id == agent_id:
+        session.delete(context)
+        session.commit()
+        response.status_code = 204
+    else:
+        logger.warning(f"Attempted to delete non-existent or mismatched context: {context_id} for agent {agent_id}")
+        response.status_code = 404
+    return response
+
