@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Literal
 
 from sqlmodel import SQLModel, Field
@@ -16,11 +17,15 @@ class Heartbeat(SQLModel, table=True):
     timestamp: int = Field(nullable=False)
 
 ### Context ###
+class ContextType(str, Enum):
+    compose = "compose"
+    swarm = "swarm"
+
 class Context(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     agent_id: str | None = Field(default=None, nullable=False, foreign_key="agent.id", index=True)
     name: str = Field(nullable=False)
-    type: Literal["compose", "swarm"] = Field(nullable=False)
+    type: ContextType = Field(nullable=False)
 
 
 ### Container Models ###
