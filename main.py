@@ -1,16 +1,31 @@
-# This is a sample Python script.
+from contextlib import asynccontextmanager
 
-# Press Umschalt+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+from fastapi import FastAPI
+import logging
+
+from src.database import create_db_and_tables
+from src.routes import router
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Strg+F8 to toggle the breakpoint.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    yield
+    # Clean up
+
+app = FastAPI(title="Clogs Server", version="0.1.0", lifespan=lifespan)
+app.include_router(router)
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+@app.get("/")
+async def root():
+    return {"message": "Clogs Server is running"}
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+if __name__ == "__main__":
+    import uvicorn
+    # Run the server with: uvicorn main:app --host 0.0.0.0 --port 8000
+    uvicorn.run(app, host="0.0.0.0", port=8000)
