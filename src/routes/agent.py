@@ -7,11 +7,15 @@ from src.model.api import MultilineLogTransfer
 from src.models.agents import Agent, Container, ContainerState, Log, Heartbeat, Context, MultiContainerLogTransfer
 from src.routes import router
 import logging
+from uuid import uuid4
 
 logger = logging.getLogger("clogs.agent")
 
 @router.post("/api/agent/")
 def register_new_agent(agent: Agent, session: SessionDep) -> str:
+    if not agent.id:
+        agent.id = str(uuid4())
+
     session.add(agent)
     session.commit()
     session.refresh(agent)
@@ -48,10 +52,14 @@ def register_container(container: Container, session: SessionDep, response: Resp
         response.status_code = 404
         return response
 
+    if not container.id:
+        container.id = str(uuid4())
+
     if session.get(Container, container.id):
         logger.warning(f"Attempted to register already existing container: {container.id}")
         response.status_code = 409
         return response
+
 
     session.add(container)
     session.commit()
