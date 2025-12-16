@@ -35,13 +35,13 @@ class Container(SQLModel, table=True):
     """
     id: str | None = Field(default=None, primary_key=True)
     agent_id: str = Field(nullable=False, foreign_key="agent.id", index=True)
-    context: int = Field(nullable=False, foreign_key="context.id", index=True)
+    context: int | None = Field(default=None, foreign_key="context.id", index=True)
     name: str = Field(nullable=False)
     image: str = Field(nullable=False)
     created_at: int = Field(nullable=False)
 
 class ContainerState(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True, foreign_key="container.id")
+    id: str | None = Field(default=None, primary_key=True, foreign_key="container.id")
     status: str = Field(nullable=False)
 
 ### Logging Models ###
@@ -50,7 +50,7 @@ class Log(SQLModel, table=True):
     """
     Represents a single log entry from a container.
     """
-    id: int | None = Field(default=None, primary_key=True)
+    id: str | None = Field(default=None, primary_key=True)
     container_id: str = Field(nullable=False, foreign_key="container.id", index=True)
     timestamp: int = Field(nullable=False)
     level: str = Field(nullable=False)
