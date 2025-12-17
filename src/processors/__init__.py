@@ -4,20 +4,26 @@ from abc import ABCMeta, abstractmethod
 from inspect import isabstract
 from typing import Optional, Type
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 from sqlmodel import Session
 
-from src.database import get_session
+from src.database import engine
 
 
 class Processor[X: BaseModel, Y: BaseModel](BaseModel, metaclass=ABCMeta):
     interval: int
-    session: Session = get_session()
+    _session: Optional[Session] = PrivateAttr(default=None)
+
+    @property
+    def session(self) -> Session:
+        if self._session is None:
+            self._session = Session(engine)
+        return self._session
 
     # "Incremental" processor methods (called for each data item)
 
     @abstractmethod
-    def on_inset(self, data: X) -> Optional[Y]:
+    def on_insert(self, data: X) -> Optional[Y]:
         pass
 
     @abstractmethod
@@ -48,26 +54,40 @@ class Processor[X: BaseModel, Y: BaseModel](BaseModel, metaclass=ABCMeta):
     def on_startup(self):
         pass
 
+    def close(self):
+        if self._session:
+            self._session.close()
+            self._session = None
+
 
 def load_processors(path) -> list[type[Processor]]:
     processors: list[Type[Processor]] = []
 
-    for file in os.listdir(path):
-        if not file.endswith(".py"):
-            continue
-        spec = util.spec_from_file_location(file[:-9], os.path.join(path, file))
-        module = util.module_from_spec(spec)
-        e = spec.loader.exec_module(module)
-
-
-        for attr in dir(module):
-            if not isinstance(getattr(module, attr), type):
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            if not file.endswith(".py"):
                 continue
-            if not issubclass(getattr(module, attr), Processor):
+            if file == "__init__.py":
                 continue
 
-            if isabstract(getattr(module, attr)):
-                continue
+            full_path = os.path.join(root, file)
+            module_name = file[:-3]
 
-            processors.append(getattr(module, attr))
+            spec = util.spec_from_file_location(module_name, full_path)
+            if spec and spec.loader:
+                module = util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+                for attr in dir(module):
+                    val = getattr(module, attr)
+                    if not isinstance(val, type):
+                        continue
+                    if not issubclass(val, Processor):
+                        continue
+                    if val is Processor:
+                        continue
+                    if isabstract(val):
+                        continue
+
+                    processors.append(val)
     return processors
