@@ -30,7 +30,7 @@ class ProcessorManager:
                 self.processors.append(instance)
 
                 # Inspect generic type X
-                model_type = self._get_model_type(cls)
+                model_type = self.get_model_type(cls)
                 if model_type:
                     if model_type not in self.processors_by_model:
                         self.processors_by_model[model_type] = []
@@ -43,19 +43,26 @@ class ProcessorManager:
             except Exception as e:
                 logger.error(f"Failed to load processor {cls}: {e}")
 
-    def _get_model_type(self, cls: Type[Processor]) -> Type | None:
+    def get_model_type(self, cls: Type[Processor]) -> Type | None:
+        return self._get_pydantic_generic_args(cls)[0] if self._get_pydantic_generic_args(cls) else None
+
+    def get_output_type(self, cls: Type[Processor]) -> Type | None:
+        return self._get_pydantic_generic_args(cls)[1] if self._get_pydantic_generic_args(cls) else None
+
+    @staticmethod
+    def _get_pydantic_generic_args(cls):
+        # Iterate over bases to find the one that has Pydantic metadata
         for base in cls.__bases__:
-            args = get_args(base)
-            if args and len(args) >= 1:
-                return args[0]
-        return None
+            metadata = getattr(base, "__pydantic_generic_metadata__", None)
+            if metadata and "args" in metadata:
+                return metadata["args"]
+        return ()
 
     def get_processors(self, model_type: Type) -> List[Processor]:
         return self.processors_by_model.get(model_type, [])
 
     async def start_interval_loop(self):
         self.running = True
-        logger.info("Starting processor interval loops")
 
         self.tasks = []
         for processor in self.processors:
@@ -74,7 +81,6 @@ class ProcessorManager:
                 await asyncio.gather(*self.tasks, return_exceptions=True)
 
     async def _run_processor_loop(self, processor: Processor):
-        logger.info(f"Started loop for {type(processor).__name__}")
         while self.running:
             start_time = time.time()
             try:
@@ -97,13 +103,41 @@ class ProcessorManager:
             processor.on_interval()
 
             # Also run on_interval_each
-            model_type = self._get_model_type(type(processor))
+            model_type = self.get_model_type(type(processor))
             if model_type:
                 with Session(engine) as session:
                     statement = select(model_type)
                     results = session.exec(statement).all()
                     for item in results:
-                        processor.on_interval_each(item)
+                        # Process each item
+
+                        processed_item = processor.on_interval_each(item)
+
+                        if not processed_item:
+                            continue
+
+                        output_type = self.get_output_type(type(processor))
+
+                        if not output_type:
+                            raise Exception(f"Processor {type(processor).__name__} returned a value from on_interval_each but has no output type.")
+
+                        if not isinstance(processed_item, output_type):
+                            raise Exception(f"Processor {type(processor).__name__} returned wrong type from on_interval_each: expected {output_type.__name__}, got {type(processed_item).__name__}")
+
+                        input_type = self.get_model_type(type(processor))
+
+                        if not input_type:
+                            raise Exception(f"Processor {type(processor).__name__} has no input type defined.")
+
+                        if input_type == output_type:
+                            # Same type, update the item directly
+                            session.merge(processed_item)
+                        else:
+                            # Different types, add the new item
+                            session.add(processed_item)
+                    session.commit()
+
+
 
             setattr(processor, "_last_run", time.time())
         except Exception as e:

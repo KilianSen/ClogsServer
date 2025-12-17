@@ -15,20 +15,22 @@ engine = create_engine(sqlite_url, connect_args=connect_args)
 
 class ProcessorSession(Session):
     def add(self, instance: Any, _warn: bool = True) -> None:
-        super().add(instance, _warn=_warn)
-        self._run_processor_hook("on_insert", instance)
+        pp = self._run_processor_hook("on_insert", instance)
+        super().add(instance if not pp else pp, _warn=_warn)
 
     def delete(self, instance: Any) -> None:
-        super().delete(instance)
-        self._run_processor_hook("on_delete", instance)
+        pp = self._run_processor_hook("on_delete", instance)
+        super().delete(instance if not pp else pp)
 
     def get(self, entity: Type[Any], ident: Any, **kwargs: Any) -> Any | None:
         instance = super().get(entity, ident, **kwargs)
+        pp: Optional[Any] = None
         if instance:
-            self._run_processor_hook("on_get", instance, model_type=entity)
-        return instance
+            pp = self._run_processor_hook("on_get", instance, model_type=entity)
+        return instance if not pp else pp
 
-    def _run_processor_hook(self, method_name: str, instance: Any, model_type: Type = None):
+    @staticmethod
+    def _run_processor_hook(method_name: str, instance: Any, model_type: Type = None) -> Any:
         try:
             # Import locally to avoid circular dependency
             from src.processors.manager import ProcessorManager
@@ -40,7 +42,20 @@ class ProcessorSession(Session):
             for processor in processors:
                 method = getattr(processor, method_name)
                 try:
-                    method(instance)
+                    post_instance = method(instance)
+
+                    output_type = ProcessorManager().get_output_type(type(processor))
+
+                    if output_type is None and post_instance is None:
+                        return instance
+                    elif post_instance is not None and output_type is None:
+                        raise Exception(f"Error in processor {method_name}: Expected None but got a value.")
+                    elif post_instance is None and output_type is not None:
+                        return None
+                    else:
+                        if not isinstance(post_instance, output_type):
+                            raise Exception(f"Error in processor {method_name}: Expected type {output_type.__name__} but got {type(post_instance).__name__}.")
+                        return post_instance
                 except Exception as e:
                     logger.error(f"Error in processor {method_name} for {model_type.__name__}: {e}")
         except ImportError:

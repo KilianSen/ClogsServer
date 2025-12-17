@@ -2,7 +2,7 @@ from importlib import util
 import os
 from abc import ABCMeta, abstractmethod
 from inspect import isabstract
-from typing import Optional, Type
+from typing import Optional, Type, get_args
 
 from pydantic import BaseModel, PrivateAttr
 from sqlmodel import Session
@@ -10,7 +10,7 @@ from sqlmodel import Session
 from src.database import engine
 
 
-class Processor[X: BaseModel, Y: BaseModel](BaseModel, metaclass=ABCMeta):
+class Processor[X: BaseModel, Y: BaseModel | None](BaseModel, metaclass=ABCMeta):
     interval: int = 60
     _session: Optional[Session] = PrivateAttr(default=None)
 
@@ -58,6 +58,13 @@ class Processor[X: BaseModel, Y: BaseModel](BaseModel, metaclass=ABCMeta):
         if self._session:
             self._session.close()
             self._session = None
+
+    def get_generic_types(self):
+        cls = type(self)
+
+        base = cls.__orig_bases__[0]
+
+        return get_args(base)
 
 
 def load_processors(path) -> list[type[Processor]]:

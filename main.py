@@ -9,6 +9,7 @@ import uvicorn
 from src.database import create_db_and_tables
 from src.routes import router
 from src.processors.manager import ProcessorManager
+import src.models.uptime  # Register uptime model
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
