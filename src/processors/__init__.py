@@ -11,7 +11,7 @@ from src.database import engine
 
 
 class Processor[X: BaseModel, Y: BaseModel](BaseModel, metaclass=ABCMeta):
-    interval: int
+    interval: int = 60
     _session: Optional[Session] = PrivateAttr(default=None)
 
     @property
