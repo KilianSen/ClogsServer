@@ -55,35 +55,59 @@ class ProcessorManager:
 
     async def start_interval_loop(self):
         self.running = True
-        logger.info("Starting processor interval loop")
-        while self.running:
-            try:
-                await self._run_intervals()
-            except Exception as e:
-                logger.error(f"Error in interval loop: {e}")
-            await asyncio.sleep(1)
+        logger.info("Starting processor interval loops")
 
-    async def _run_intervals(self):
-        now = time.time()
-
+        self.tasks = []
         for processor in self.processors:
-            last_run = getattr(processor, "_last_run", 0)
-            if now - last_run >= processor.interval:
+            task = asyncio.create_task(self._run_processor_loop(processor))
+            self.tasks.append(task)
+
+        try:
+            while self.running:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            logger.info("Interval loop cancelled")
+        finally:
+            for task in self.tasks:
+                task.cancel()
+            if self.tasks:
+                await asyncio.gather(*self.tasks, return_exceptions=True)
+
+    async def _run_processor_loop(self, processor: Processor):
+        logger.info(f"Started loop for {type(processor).__name__}")
+        while self.running:
+            start_time = time.time()
+            try:
+                # Run blocking operations in a separate thread
+                await asyncio.to_thread(self._execute_processor_interval, processor)
+            except Exception as e:
+                logger.error(f"Error in processor loop for {type(processor).__name__}: {e}")
+
+            elapsed = time.time() - start_time
+            sleep_time = max(0.1, processor.interval - elapsed)
+
+            if sleep_time > 0:
                 try:
-                    processor.on_interval()
+                    await asyncio.sleep(sleep_time)
+                except asyncio.CancelledError:
+                    break
 
-                    # Also run on_interval_each
-                    model_type = self._get_model_type(type(processor))
-                    if model_type:
-                        with Session(engine) as session:
-                            statement = select(model_type)
-                            results = session.exec(statement).all()
-                            for item in results:
-                                processor.on_interval_each(item)
+    def _execute_processor_interval(self, processor: Processor):
+        try:
+            processor.on_interval()
 
-                    setattr(processor, "_last_run", now)
-                except Exception as e:
-                    logger.error(f"Error running interval for {type(processor).__name__}: {e}")
+            # Also run on_interval_each
+            model_type = self._get_model_type(type(processor))
+            if model_type:
+                with Session(engine) as session:
+                    statement = select(model_type)
+                    results = session.exec(statement).all()
+                    for item in results:
+                        processor.on_interval_each(item)
+
+            setattr(processor, "_last_run", time.time())
+        except Exception as e:
+            logger.error(f"Error running interval for {type(processor).__name__}: {e}")
 
     def shutdown(self):
         self.running = False
