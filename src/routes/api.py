@@ -4,7 +4,7 @@ from sqlmodel import select
 from sqlmodel import Session
 
 from src.database import SessionDep
-from src.models.agents import Container, ContainerState, Context
+from src.models.agents import Container, ContainerState, Context, Log
 from src.routes import router
 
 logger = logging.getLogger(__name__)
@@ -85,3 +85,22 @@ def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerCo
         services[context.name].append(service)
 
     return services
+
+@router.get("/api/web/logs", tags=["API"])
+def get_logs(container_id: Union[str, None] = None, limit: int = 100, session: SessionDep = SessionDep()) -> list[Log]:
+    """
+    Retrieves logs for a specific container or all containers if no container_id is provided.
+    :param container_id: The ID of the container to retrieve logs for. If None, retrieves logs for all containers.
+    :param limit: The maximum number of log entries to retrieve.
+    :param session: The database session dependency.
+    :return: A list of log entries.
+    """
+
+    statement = select(Log)
+    if container_id:
+        statement = statement.where(Log.container_id == container_id)
+    statement = statement.order_by(Log.timestamp.desc()).limit(limit)
+
+    results = session.exec(statement).all()
+
+    return results
