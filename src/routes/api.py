@@ -1,6 +1,87 @@
 import logging
+from typing import Union, List
+from sqlmodel import select
+from sqlmodel import Session
 
+from src.database import SessionDep
+from src.models.agents import Container, ContainerState, Context
 from src.routes import router
 
 logger = logging.getLogger(__name__)
 
+@router.get("/api/health", tags=["API"])
+def health_check():
+    """
+    Health check endpoint to verify that the API is running.
+    """
+    return {"status": "ok"}
+
+
+class _IntersectionContainerAndState(Container, ContainerState):
+    pass
+
+@router.get("/api/web/orphans", tags=["API"])
+def get_orphans(session: SessionDep) -> list[_IntersectionContainerAndState]:
+    """
+    Retrieves a list of containers that do not have an associated state entry.
+    These are considered "orphaned" containers.
+    :return:
+    """
+
+    statement = select(Container).where(
+        ~Container.id.in_(
+            select(ContainerState.id)
+        )
+    )
+
+    results = session.exec(statement).all()
+
+    orphans: list[_IntersectionContainerAndState] = []
+    for container in results:
+        orphan = _IntersectionContainerAndState(
+            id=container.id,
+            agent_id=container.agent_id,
+            context=container.context,
+            name=container.name,
+            image=container.image,
+            created_at=container.created_at,
+            status="unknown"  # Since there's no state, we set status to unknown
+        )
+        orphans.append(orphan)
+
+    return orphans
+
+class _IntersectionContainerContainerAndState(_IntersectionContainerAndState, Context):
+    pass
+
+@router.get("/api/web/services", tags=["API"])
+def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerContainerAndState]]:
+    """
+    Retrieves a mapping of context names to their associated containers and states.
+    :return:
+    """
+    statement = select(Container, Context, ContainerState).join(
+        Context, Container.context == Context.id
+    ).join(
+        ContainerState, Container.id == ContainerState.id
+    )
+
+    results = session.exec(statement).all()
+
+    services: dict[str, List[_IntersectionContainerContainerAndState]] = {}
+    for container, context, state in results:
+        service = _IntersectionContainerContainerAndState(
+            id=container.id,
+            agent_id=container.agent_id,
+            context=container.context,
+            name=container.name,
+            image=container.image,
+            created_at=container.created_at,
+            status=state.status,
+            type=context.type,
+        )
+        if context.name not in services:
+            services[context.name] = []
+        services[context.name].append(service)
+
+    return services

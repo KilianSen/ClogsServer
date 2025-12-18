@@ -4,6 +4,7 @@ from abc import ABCMeta, abstractmethod
 from inspect import isabstract
 from typing import Optional, Type, get_args
 
+from fastapi import APIRouter
 from pydantic import BaseModel, PrivateAttr
 from sqlmodel import Session
 
@@ -12,6 +13,7 @@ from src.database import engine
 
 class Processor[X: BaseModel, Y: BaseModel | None](BaseModel, metaclass=ABCMeta):
     interval: int = 60
+    _router: Optional[APIRouter] = PrivateAttr(default=None)
     _session: Optional[Session] = PrivateAttr(default=None)
 
     @property

@@ -15,15 +15,16 @@ import src.models.uptime  # Register uptime model
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+create_db_and_tables()
+
+# Initialize processors
+manager = ProcessorManager()
+processors_path = os.path.join(os.path.dirname(__file__), "src", "processors")
+manager.load_all(processors_path, router)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    create_db_and_tables()
 
-    # Initialize processors
-    manager = ProcessorManager()
-    processors_path = os.path.join(os.path.dirname(__file__), "src", "processors")
-    manager.load_all(processors_path)
 
     # Start interval loop
     task = asyncio.create_task(manager.start_interval_loop())

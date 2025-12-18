@@ -2,6 +2,10 @@ import logging
 from types import NoneType
 from typing import Optional
 from time import time
+
+from fastapi import APIRouter
+from sqlmodel import select
+
 from src.processors import Processor
 from src.models.agents import Container, ContainerState
 from src.models.uptime import ContainerUptime
@@ -12,6 +16,12 @@ class UptimeProcessor(Processor[Container, NoneType]):
     interval: int = 5  # Check every minute
 
     def on_startup(self):
+        @self._router.get("/api/processors/uptime")
+        def get_uptime():
+            uptimes = self.session.exec(
+                select(ContainerUptime)
+            ).all()
+            return uptimes
         pass
 
     def on_insert(self, data: Container) -> Optional[Container]:
@@ -48,4 +58,5 @@ class UptimeProcessor(Processor[Container, NoneType]):
 
     def on_shutdown(self):
         pass
+
 

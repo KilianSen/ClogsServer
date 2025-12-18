@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Type, List, get_args
 
+from fastapi import APIRouter
 from sqlmodel import Session, select
 
 from src.database import engine
@@ -21,12 +22,13 @@ class ProcessorManager:
             cls._instance.running = False
         return cls._instance
 
-    def load_all(self, path: str):
+    def load_all(self, path: str, router: APIRouter):
         logger.info(f"Loading processors from {path}")
         processor_classes = load_processors(path)
         for cls in processor_classes:
             try:
                 instance = cls()
+                instance._router = router
                 self.processors.append(instance)
 
                 # Inspect generic type X
