@@ -16,7 +16,7 @@ class UptimeProcessor(Processor[Container, NoneType]):
     interval: int = 5  # Check every minute
 
     def on_startup(self):
-        @self._router.get("/api/processors/uptime")
+        @self._router.get("/api/processors/uptime", tags=["API"])
         def get_uptime():
             uptimes = self.session.exec(
                 select(ContainerUptime)
