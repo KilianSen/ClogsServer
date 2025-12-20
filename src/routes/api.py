@@ -4,7 +4,7 @@ from sqlmodel import select
 from sqlmodel import Session
 
 from src.database import SessionDep
-from src.models.agents import Container, ContainerState, Context, Log
+from src.models.agents import Container, ContainerState, Context, Log, Agent
 from src.routes import router
 
 logger = logging.getLogger(__name__)
@@ -104,3 +104,24 @@ def get_logs(container_id: Union[str, None] = None, limit: int = 100, session: S
     results = session.exec(statement).all()
 
     return results
+
+@router.get("/api/web/agents", tags=["API"])
+def get_agents(session: SessionDep) -> list[Agent]:
+    """
+    Retrieves a list of agents with their details.
+    :return:
+    """
+    statement = select(Agent)
+    results = session.exec(statement).all()
+    agents: list[Agent] = []
+    for agent in results:
+        agent_model = Agent(
+            id=agent.id[0:8],  # Shortened ID for display
+            hostname=agent.hostname,
+            heartbeat_interval=agent.heartbeat_interval,
+            discovery_interval=agent.discovery_interval,
+            on_host=agent.on_host
+        )
+        agents.append(agent_model)
+
+    return agents

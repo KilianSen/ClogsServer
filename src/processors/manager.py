@@ -113,6 +113,11 @@ class ProcessorManager:
                     for item in results:
                         # Process each item
 
+                        # TODO: Maybe make this async later or batch process or parallelize
+                        # TODO: Maybe handlelike real this item gets transformed into this other item (or nothing), this
+                        # Would allow for like collector tables that gather data, and this data would all be consumed into
+                        # another table or something.
+
                         processed_item = processor.on_interval_each(item)
 
                         if not processed_item:
