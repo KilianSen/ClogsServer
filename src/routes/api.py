@@ -28,13 +28,18 @@ def get_orphans(session: SessionDep) -> list[_IntersectionContainerAndState]:
     :return:
     """
 
+    orphans = []
     statement = select(Container).where(
-        ~Container.id.in_(
-            select(ContainerState.id)
-        )
+        Container.context.is_(None),
     )
-
     results = session.exec(statement).all()
+
+    statuses: dict[str, str] = {}
+    state_statement = select(ContainerState)
+    state_results = session.exec(state_statement).all()
+    for state in state_results:
+        statuses[state.id] = state.status
+
 
     orphans: list[_IntersectionContainerAndState] = []
     for container in results:
@@ -45,7 +50,7 @@ def get_orphans(session: SessionDep) -> list[_IntersectionContainerAndState]:
             name=container.name,
             image=container.image,
             created_at=container.created_at,
-            status="unknown"  # Since there's no state, we set status to unknown
+            status=statuses.get(container.id, "unknown")
         )
         orphans.append(orphan)
 
@@ -87,9 +92,10 @@ def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerCo
     return services
 
 @router.get("/api/web/logs", tags=["API"])
-def get_logs(container_id: Union[str, None] = None, limit: int = 100, session: SessionDep = SessionDep()) -> list[Log]:
+def get_logs(container_id: Union[str, None] = None, limit: int = 100, level: str | None = None, session: SessionDep = SessionDep()) -> list[Log]:
     """
     Retrieves logs for a specific container or all containers if no container_id is provided.
+    :param level: The log level to filter by (e.g., "INFO", "ERROR"). If None, retrieves logs of all levels.
     :param container_id: The ID of the container to retrieve logs for. If None, retrieves logs for all containers.
     :param limit: The maximum number of log entries to retrieve.
     :param session: The database session dependency.
@@ -99,6 +105,8 @@ def get_logs(container_id: Union[str, None] = None, limit: int = 100, session: S
     statement = select(Log)
     if container_id:
         statement = statement.where(Log.container_id == container_id)
+    if level:
+        statement = statement.where(Log.level == level.upper())
     statement = statement.order_by(Log.timestamp.desc()).limit(limit)
 
     results = session.exec(statement).all()
