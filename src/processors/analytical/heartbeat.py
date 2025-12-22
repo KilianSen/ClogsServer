@@ -45,7 +45,7 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
     def on_interval(self):
         # For each agent, check if we have received a heartbeat recently (its heartbeat_interval + leniency)
         # If heartbeats are missing, set all containers to 'unknown' state
-
+        logger.debug("Running heartbeat interval check.")
         agents: list[Agent] = list(self.session.exec(
             select(Agent)
         ).all())
