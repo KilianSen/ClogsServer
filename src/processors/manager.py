@@ -148,7 +148,8 @@ class ProcessorManager:
 
             setattr(processor, "_last_run", time.time())
         except Exception as e:
-            logger.error(f"Error running interval for {type(processor).__name__}: {e}")
+            import traceback
+            logger.error(f"Error running interval for {type(processor).__name__}: {e}\n{traceback.format_exc()}")
 
     def shutdown(self):
         self.running = False

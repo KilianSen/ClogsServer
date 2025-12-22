@@ -52,6 +52,7 @@ class Container(SQLModel, table=True):
 class ContainerState(SQLModel, table=True):
     id: str | None = Field(default=None, primary_key=True, foreign_key="container.id")
     status: str = Field(nullable=False)
+    since: int = Field(nullable=False)
 
 
 ### Logging Models ###

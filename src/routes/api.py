@@ -1,5 +1,5 @@
 import logging
-from typing import Union, List
+from typing import Union, List, Any
 from sqlmodel import select
 from sqlmodel import Session
 
@@ -34,15 +34,18 @@ def get_orphans(session: SessionDep) -> list[_IntersectionContainerAndState]:
     )
     results = session.exec(statement).all()
 
-    statuses: dict[str, str] = {}
+    statuses: dict[str, ContainerState] = {}
     state_statement = select(ContainerState)
     state_results = session.exec(state_statement).all()
     for state in state_results:
-        statuses[state.id] = state.status
+        statuses[state.id] = state
 
 
     orphans: list[_IntersectionContainerAndState] = []
     for container in results:
+        status = statuses.get(container.id, None)
+
+
         orphan = _IntersectionContainerAndState(
             id=container.id,
             agent_id=container.agent_id,
@@ -50,7 +53,8 @@ def get_orphans(session: SessionDep) -> list[_IntersectionContainerAndState]:
             name=container.name,
             image=container.image,
             created_at=container.created_at,
-            status=statuses.get(container.id, "unknown")
+            status=status.status if status else "unknown",
+            since=status.since if status else 0,
         )
         orphans.append(orphan)
 
@@ -75,6 +79,9 @@ def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerCo
 
     services: dict[str, List[_IntersectionContainerContainerAndState]] = {}
     for container, context, state in results:
+
+
+
         service = _IntersectionContainerContainerAndState(
             id=container.id,
             agent_id=container.agent_id,
@@ -83,6 +90,7 @@ def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerCo
             image=container.image,
             created_at=container.created_at,
             status=state.status,
+            since=state.since,
             type=context.type,
         )
         if context.name not in services:
@@ -124,7 +132,7 @@ def get_agents(session: SessionDep) -> list[Agent]:
     agents: list[Agent] = []
     for agent in results:
         agent_model = Agent(
-            id=agent.id[0:8],  # Shortened ID for display
+            id=agent.id,
             hostname=agent.hostname,
             heartbeat_interval=agent.heartbeat_interval,
             discovery_interval=agent.discovery_interval,

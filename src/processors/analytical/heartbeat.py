@@ -1,19 +1,36 @@
+from enum import Enum
 import logging
 from types import NoneType
 from typing import Optional
 from time import time
 
-from sqlmodel import select
+from sqlmodel import select, SQLModel, Field
 
 from src.processors import Processor
 from src.models.agents import Agent, ContainerState, Heartbeat, Container
 
 logger = logging.getLogger(__name__)
 
+class AliveState(Enum):
+    active = "active"
+    inactive = "inactive"
+
+class AliveAgent(SQLModel, table=True):
+    agent_id: str = Field(primary_key=True, foreign_key="agent.id")
+    state: AliveState
+
 class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
     interval: int = 5
 
     def on_startup(self):
+
+        @self._router.get("/api/processors/active")
+        def get_active_agents() -> dict[str, bool]:
+            agents: list[AliveAgent] = list(self.session.exec(
+                select(AliveAgent)
+            ).all())
+            return {a.agent_id: a.state == AliveState.active for a in agents}
+
         pass
 
     def on_insert(self, data: Heartbeat) -> Optional[Heartbeat]:
@@ -47,6 +64,21 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
                 )
             ).all()
 
+            active: AliveAgent | None = self.session.get(AliveAgent, agent.id)
+            if not active:
+                active = AliveAgent(agent_id=agent.id, state=AliveState.active if heartbeats else AliveState.inactive)
+                self.session.add(active)
+                self.session.commit()
+            else:
+                if heartbeats and active.state == AliveState.inactive:
+                    active.state = AliveState.active
+                    self.session.add(active)
+                    self.session.commit()
+                elif not heartbeats and active.state == AliveState.active:
+                    active.state = AliveState.inactive
+                    self.session.add(active)
+                    self.session.commit()
+
             if not heartbeats:
                 logger.warning(f"Agent {agent.id} is missing heartbeats. Marking its containers as 'unknown'.")
                 containers = self.session.exec(
@@ -62,10 +94,6 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
                         self.session.add(state)
 
                 self.session.commit()
-
-
-
-
 
     def on_interval_each(self, heartbeat: Heartbeat) -> Optional[Heartbeat]:
         pass

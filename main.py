@@ -9,18 +9,18 @@ import uvicorn
 from src.database import create_db_and_tables
 from src.routes import router
 from src.processors.manager import ProcessorManager
-import src.models.uptime  # Register uptime model
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-create_db_and_tables()
-
 # Initialize processors
 manager = ProcessorManager()
 processors_path = os.path.join(os.path.dirname(__file__), "src", "processors")
 manager.load_all(processors_path, router)
+
+# Create database and tables (this should be done before starting the app, but after defining models)
+create_db_and_tables()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

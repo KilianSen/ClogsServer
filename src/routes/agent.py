@@ -112,7 +112,7 @@ def upload_container_logs(agent_id: str, container_id: str, logs: Log | Multilin
 
 
 @router.post("/api/agent/{agent_id}/container/{container_id}/status")
-def update_container_status(agent_id: str, container_id: str, status: str, session: SessionDep):
+def update_container_status(agent_id: str, container_id: str, status: str, since: int, session: SessionDep):
     container = session.get(Container, container_id)
     if not container or container.agent_id != agent_id:
         raise HTTPException(status_code=404, detail="Container not found or mismatched agent ID")
@@ -121,7 +121,8 @@ def update_container_status(agent_id: str, container_id: str, status: str, sessi
     if not container_state:
         container_state = ContainerState(
             id=container_id,
-            status=status
+            status=status,
+            since=since
         )
         session.merge(container_state)
     else:
