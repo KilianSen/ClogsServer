@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-sqlite_file_name = "clogs.db"
+sqlite_file_name = ".clogs/server/clogs.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
 connect_args = {"check_same_thread": False}
