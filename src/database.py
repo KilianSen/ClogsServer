@@ -3,10 +3,15 @@ from typing import Annotated, Type, Any, Optional
 from fastapi import Depends
 from sqlmodel import Session, SQLModel, create_engine
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 sqlite_file_name = ".clogs/server/clogs.db"
+
+# Check if the directory exists, if not create it
+os.makedirs(os.path.dirname(sqlite_file_name), exist_ok=True)
+
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
 connect_args = {"check_same_thread": False}

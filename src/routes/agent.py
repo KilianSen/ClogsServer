@@ -6,9 +6,8 @@ from typing import List
 from sqlmodel import select
 
 from src.database import SessionDep
-from src.model.api import MultilineLogTransfer
 from src.models.agents import Agent, Container, ContainerState, Log, Heartbeat, Context, MultiContainerLogTransfer, \
-    LogProtocol
+    LogProtocol, MultilineLogTransfer
 from src.routes import router
 import logging
 from uuid import uuid4
