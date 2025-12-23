@@ -68,3 +68,13 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  trigger-clogs-update:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Clogs Update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          repository: kiliansen/clogs
+          event-type: component-update
