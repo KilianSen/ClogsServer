@@ -4,6 +4,7 @@ from types import NoneType
 from typing import Optional
 from time import time
 
+from sqlalchemy import desc
 from sqlmodel import select, Field, SQLModel, Session
 
 from src.processors import Processor
@@ -77,20 +78,30 @@ class UptimeProcessor(Processor[Container, NoneType]):
                                             first_recorded=container.created_at)
 
         # We assume "running" status means it's up.
+        current_time = int(time())
         if state and state.status.lower() == "running":
-            uptime_record.uptime_seconds += self.interval
-
-
+            last_run = getattr(self, "_last_run", None)
+            if last_run:
+                delta = time() - last_run
+                uptime_record.uptime_seconds += int(delta)
+            else:
+                # First run, do not add uptime to avoid overcounting on restarts
+                pass
 
         # Calculate percentage uptime
-        total_time = int(time()) - uptime_record.first_recorded
+        total_time = current_time - uptime_record.first_recorded
+
+        # Fix for potential overcounting
+        if total_time > 0 and uptime_record.uptime_seconds > total_time:
+            uptime_record.uptime_seconds = total_time
+
         uptime_record.uptime_percentage = round(min((uptime_record.uptime_seconds / total_time) * 100,100.0) if total_time > 0 else 0.0,4)
 
         self.session.add(uptime_record)
 
         # Check for state changes
         last_section = self.session.exec(
-            select(UptimeSection).where(UptimeSection.container_id == container.id).order_by(UptimeSection.start_time.desc())
+            select(UptimeSection).where(UptimeSection.container_id == container.id).order_by(desc(UptimeSection.start_time))
         ).first()
         current_time = int(time())
         if not last_section or last_section.state != (state.status if state else "unknown"):
