@@ -89,7 +89,7 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
 
                 for container in containers:
                     state = self.session.get(ContainerState, container.id)
-                    if state and state.status != "unknown":
+                    if state and state.status in ["running", "paused", "restarting"]:
                         state.status = "unknown"
                         self.session.add(state)
 
