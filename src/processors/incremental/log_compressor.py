@@ -12,15 +12,9 @@ class LogCompressorProcessor(Processor[Log, Log]):
     interval: int = 600
 
     def on_insert(self, log: Log) -> Optional[Log]:
-        # Get the session associated with the log object
-        session: Session = object_session(log)
-
-        if not session:
-            return None
-
-        # Query the last log for this container
+        # Query the last log for this container using the injected session
         statement = select(Log).where(Log.container_id == log.container_id).order_by(col(Log.timestamp).desc()).limit(1)
-        result = session.exec(statement).first()
+        result = self.session.exec(statement).first()
 
         if result:
             last_log = result
@@ -39,11 +33,6 @@ class LogCompressorProcessor(Processor[Log, Log]):
                 new_count = count + 1
                 last_log.message = f"{last_msg_base} x{new_count}"
                 last_log.timestamp = log.timestamp # Update timestamp to latest
-
-                session.add(last_log)
-
-                # Remove the new log from the session so it's not inserted
-                session.delete(log)
 
                 return last_log
 

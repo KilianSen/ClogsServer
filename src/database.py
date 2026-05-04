@@ -34,8 +34,7 @@ class ProcessorSession(Session):
             pp = self._run_processor_hook("on_get", instance, model_type=entity)
         return instance if not pp else pp
 
-    @staticmethod
-    def _run_processor_hook(method_name: str, instance: Any, model_type: Type = None) -> Any:
+    def _run_processor_hook(self, method_name: str, instance: Any, model_type: Type = None) -> Any:
         try:
             # Import locally to avoid circular dependency
             from src.processors.manager import ProcessorManager
@@ -45,6 +44,9 @@ class ProcessorSession(Session):
 
             processors = ProcessorManager().get_processors(model_type)
             for processor in processors:
+                # Inject the current session into the processor
+                processor._session = self
+                
                 method = getattr(processor, method_name)
                 try:
                     post_instance = method(instance)
@@ -52,23 +54,28 @@ class ProcessorSession(Session):
                     output_type = ProcessorManager().get_output_type(type(processor))
 
                     if output_type is None and post_instance is None:
-                        return instance
+                        continue # Try next processor
                     elif post_instance is not None and output_type is None:
                         raise Exception(f"Error in processor {method_name}: Expected None but got a value.")
                     elif post_instance is None and output_type is not None:
-                        return None
+                        return None # This processor decided to drop the instance
                     else:
                         if not isinstance(post_instance, output_type):
                             raise Exception(f"Error in processor {method_name}: Expected type {output_type.__name__} but got {type(post_instance).__name__}.")
-                        return post_instance
+                        instance = post_instance # Update instance for next processor
                 except Exception as e:
                     logger.error(f"Error in processor {method_name} for {model_type.__name__}: {e}")
+                finally:
+                    # Clear the injected session to avoid leaking or side effects
+                    processor._session = None
+            
+            return instance
         except ImportError:
             # ProcessorManager might not be ready or circular import issue during startup
-            pass
+            return instance
         except Exception as e:
             logger.error(f"Error running processor hook: {e}")
-
+            return instance
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)

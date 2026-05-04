@@ -104,10 +104,16 @@ class UptimeProcessor(Processor[Container, NoneType]):
             select(UptimeSection).where(UptimeSection.container_id == container.id).order_by(desc(UptimeSection.start_time))
         ).first()
         current_time = int(time())
-        if not last_section or last_section.state != (state.status if state else "unknown"):
+        last_run = getattr(self, "_last_run", None)
+        
+        # Determine if there was a monitoring gap (e.g., more than double the interval)
+        is_gap = last_run and (current_time - last_run > self.interval * 2)
+        
+        if not last_section or last_section.state != (state.status if state else "unknown") or is_gap:
             # Close previous section
             if last_section and last_section.end_time is None:
-                last_section.end_time = current_time
+                # If there was a gap, use the last known activity time as end_time instead of current_time
+                last_section.end_time = int(last_run) if is_gap and last_run else current_time
                 self.session.merge(last_section)
 
             # Start new section

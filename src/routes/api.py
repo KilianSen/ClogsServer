@@ -100,10 +100,10 @@ def get_services(session: SessionDep) -> dict[str, List[_IntersectionContainerCo
     return services
 
 @router.get("/api/web/logs", tags=["API"])
-def get_logs(container_id: Union[str, None] = None, limit: int = 100, level: str | None = None, session: SessionDep = SessionDep()) -> list[Log]:
+def get_logs(container_id: Union[str, None] = None, limit: int = 100, level: str | None = None, session: SessionDep = None) -> list[Log]:
     """
     Retrieves logs for a specific container or all containers if no container_id is provided.
-    :param level: The log level to filter by (e.g., "INFO", "ERROR"). If None, retrieves logs of all levels.
+    :param level: The minimum log level to filter by (e.g., "WARNING" includes "ERROR").
     :param container_id: The ID of the container to retrieve logs for. If None, retrieves logs for all containers.
     :param limit: The maximum number of log entries to retrieve.
     :param session: The database session dependency.
@@ -113,8 +113,18 @@ def get_logs(container_id: Union[str, None] = None, limit: int = 100, level: str
     statement = select(Log)
     if container_id:
         statement = statement.where(Log.container_id == container_id)
+    
     if level:
-        statement = statement.where(Log.level == level.upper())
+        level_upper = level.upper()
+        if level_upper == "WARNING":
+            statement = statement.where(Log.level.in_(["WARNING", "ERROR"]))
+        elif level_upper == "ERROR":
+            statement = statement.where(Log.level == "ERROR")
+        elif level_upper == "DEBUG":
+            statement = statement.where(Log.level.in_(["DEBUG", "INFO", "WARNING", "ERROR"]))
+        else: # Default to INFO and above
+            statement = statement.where(Log.level.in_(["INFO", "WARNING", "ERROR"]))
+
     statement = statement.order_by(Log.timestamp.desc()).limit(limit)
 
     results = session.exec(statement).all()
@@ -128,16 +138,4 @@ def get_agents(session: SessionDep) -> list[Agent]:
     :return:
     """
     statement = select(Agent)
-    results = session.exec(statement).all()
-    agents: list[Agent] = []
-    for agent in results:
-        agent_model = Agent(
-            id=agent.id,
-            hostname=agent.hostname,
-            heartbeat_interval=agent.heartbeat_interval,
-            discovery_interval=agent.discovery_interval,
-            on_host=agent.on_host
-        )
-        agents.append(agent_model)
-
-    return agents
+    return session.exec(statement).all()

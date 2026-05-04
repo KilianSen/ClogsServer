@@ -46,18 +46,19 @@ class ProcessorManager:
                 logger.error(f"Failed to load processor {cls}: {e}")
 
     def get_model_type(self, cls: Type[Processor]) -> Type | None:
-        return self._get_pydantic_generic_args(cls)[0] if self._get_pydantic_generic_args(cls) else None
+        args = self._get_generic_args(cls)
+        return args[0] if args else None
 
     def get_output_type(self, cls: Type[Processor]) -> Type | None:
-        return self._get_pydantic_generic_args(cls)[1] if self._get_pydantic_generic_args(cls) else None
+        args = self._get_generic_args(cls)
+        return args[1] if len(args) > 1 else None
 
     @staticmethod
-    def _get_pydantic_generic_args(cls):
-        # Iterate over bases to find the one that has Pydantic metadata
-        for base in cls.__bases__:
-            metadata = getattr(base, "__pydantic_generic_metadata__", None)
-            if metadata and "args" in metadata:
-                return metadata["args"]
+    def _get_generic_args(cls):
+        # Look for __orig_bases__ to find generic arguments in a more standard way
+        for base in getattr(cls, "__orig_bases__", []):
+            if get_args(base):
+                return get_args(base)
         return ()
 
     def get_processors(self, model_type: Type) -> List[Processor]:
@@ -101,55 +102,88 @@ class ProcessorManager:
                     break
 
     def _execute_processor_interval(self, processor: Processor):
+        max_retries = 3
+        retry_delay = 0.5
+        
         try:
-            processor.on_interval()
+            # Run on_interval which may handle its own session
+            for attempt in range(max_retries):
+                try:
+                    processor.on_interval()
+                    break
+                except Exception as e:
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    logger.error(f"Error in on_interval for {type(processor).__name__}: {e}")
+                    break
 
             # Also run on_interval_each
             model_type = self.get_model_type(type(processor))
             if model_type:
+                # Use a fresh session and ensure it's closed
                 with Session(engine) as session:
-                    statement = select(model_type)
-                    results = session.exec(statement).all()
-                    for item in results:
-                        # Process each item
+                    for attempt in range(max_retries):
+                        try:
+                            # Paginated processing to avoid memory exhaustion
+                            offset = 0
+                            batch_size = 100
+                            
+                            while True:
+                                statement = select(model_type).offset(offset).limit(batch_size)
+                                results = session.exec(statement).all()
+                                
+                                if not results:
+                                    break
+                                    
+                                for item in results:
+                                    try:
+                                        processed_item = processor.on_interval_each(item)
 
-                        # TODO: Maybe make this async later or batch process or parallelize
-                        # TODO: Maybe handlelike real this item gets transformed into this other item (or nothing), this
-                        # Would allow for like collector tables that gather data, and this data would all be consumed into
-                        # another table or something.
+                                        if not processed_item:
+                                            continue
 
-                        processed_item = processor.on_interval_each(item)
+                                        output_type = self.get_output_type(type(processor))
 
-                        if not processed_item:
-                            continue
+                                        if not output_type:
+                                            raise Exception(f"Processor {type(processor).__name__} returned a value from on_interval_each but has no output type.")
 
-                        output_type = self.get_output_type(type(processor))
+                                        if not isinstance(processed_item, output_type):
+                                            raise Exception(f"Processor {type(processor).__name__} returned wrong type from on_interval_each: expected {output_type.__name__}, got {type(processed_item).__name__}")
 
-                        if not output_type:
-                            raise Exception(f"Processor {type(processor).__name__} returned a value from on_interval_each but has no output type.")
+                                        input_type = self.get_model_type(type(processor))
 
-                        if not isinstance(processed_item, output_type):
-                            raise Exception(f"Processor {type(processor).__name__} returned wrong type from on_interval_each: expected {output_type.__name__}, got {type(processed_item).__name__}")
+                                        if not input_type:
+                                            raise Exception(f"Processor {type(processor).__name__} has no input type defined.")
 
-                        input_type = self.get_model_type(type(processor))
-
-                        if not input_type:
-                            raise Exception(f"Processor {type(processor).__name__} has no input type defined.")
-
-                        if input_type == output_type:
-                            # Same type, update the item directly
-                            session.merge(processed_item)
-                        else:
-                            # Different types, add the new item
-                            session.add(processed_item)
-                    session.commit()
-
-
+                                        if input_type == output_type:
+                                            # Same type, update the item directly
+                                            session.merge(processed_item)
+                                        else:
+                                            # Different types, add the new item
+                                            session.add(processed_item)
+                                    except Exception as e:
+                                        logger.error(f"Error processing item in on_interval_each for {type(processor).__name__}: {e}")
+                                
+                                offset += batch_size
+                                # Commit after each batch to keep transaction sizes manageable
+                                session.commit()
+                            
+                            break
+                        except Exception as e:
+                            session.rollback()
+                            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                                time.sleep(retry_delay)
+                                continue
+                            logger.error(f"Failed to commit interval_each for {type(processor).__name__}: {e}")
+                            break
+                    finally:
+                        session.close()
 
             setattr(processor, "_last_run", time.time())
         except Exception as e:
             import traceback
-            logger.error(f"Error running interval for {type(processor).__name__}: {e}\n{traceback.format_exc()}")
+            logger.error(f"Unexpected error running interval for {type(processor).__name__}: {e}\n{traceback.format_exc()}")
 
     def shutdown(self):
         self.running = False

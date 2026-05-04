@@ -68,18 +68,18 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
             if not active:
                 active = AliveAgent(agent_id=agent.id, state=AliveState.active if heartbeats else AliveState.inactive)
                 self.session.add(active)
-                self.session.commit()
             else:
                 if heartbeats and active.state == AliveState.inactive:
                     active.state = AliveState.active
                     self.session.add(active)
-                    self.session.commit()
                 elif not heartbeats and active.state == AliveState.active:
                     active.state = AliveState.inactive
                     self.session.add(active)
-                    self.session.commit()
 
             if not heartbeats:
+                active.state = AliveState.inactive
+                self.session.add(active)
+                
                 logger.warning(f"Agent {agent.id} is missing heartbeats. Marking its containers as 'unknown'.")
                 containers = self.session.exec(
                     select(Container).where(
@@ -89,11 +89,18 @@ class HeartbeatProcessor(Processor[Heartbeat, NoneType]):
 
                 for container in containers:
                     state = self.session.get(ContainerState, container.id)
-                    if state:
+                    if state and state.status != "unknown":
                         state.status = "unknown"
                         self.session.add(state)
 
-                self.session.commit()
+        # Cleanup old heartbeats (keep only the last 1 hour of data)
+        # Use bulk delete for efficiency
+        from sqlalchemy import delete
+        cleanup_threshold = int((current_time - 3600) * 10**9)
+        statement = delete(Heartbeat).where(Heartbeat.timestamp < cleanup_threshold)
+        self.session.exec(statement)
+
+        self.session.commit()
 
     def on_interval_each(self, heartbeat: Heartbeat) -> Optional[Heartbeat]:
         pass
